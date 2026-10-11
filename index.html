@@ -75,42 +75,55 @@ const detail=document.getElementById('data-tables');
 for(const site of ['HSS','SXHH']){let rows=[];for(const [type,entries] of Object.entries(DATA[site]).sort(([a],[b])=>(site==='SXHH'?({'59A':'59B','59B':'59A','75A':'75B','75B':'75A','84A':'84B','84B':'84A'}[a]||a):a).localeCompare(site==='SXHH'?({'59A':'59B','59B':'59A','75A':'75B','75B':'75A','84A':'84B','84B':'84A'}[b]||b):b,'en',{numeric:true})))for(const r of [...entries].sort((a,b)=>a.start-b.start))for(let floor=r.start;floor<=r.end;floor++)rows.push(`<tr><td>${site==='SXHH'?({'59A':'59B','59B':'59A','75A':'75B','75B':'75A','84A':'84B','84B':'84A'}[type]||type):type}</td><td>${floor}</td><td>${money(r.sale)}</td><td>${money(r.ext)}</td><td>${money(r.air)}</td><td>${money(r.sale+r.ext+r.air)}</td></tr>`);detail.insertAdjacentHTML('beforeend',`<section class="source-section" id="source-${site}" hidden><h3>${site==='HSS'?'해링턴 스퀘어 산곡역':'산곡역 자이힐스테이트앤하늘채'} 층별 가격 자료 (${rows.length}개 층별 항목)</h3><p class="note">※ 원본의 5~9층처럼 묶인 구간은 5·6·7·8·9층 각각 동일 가격으로 펼쳐 표시합니다.</p><div class="tablewrap"><table><thead><tr><th>타입</th><th>층수</th><th>분양가</th><th>확장비</th><th>에어컨</th><th>계산 합계</th></tr></thead><tbody>${rows.join('')}</tbody></table></div></section>`)}
 for(const site of ['HSS','SXHH']){document.getElementById('show-'+site.toLowerCase()).addEventListener('click',()=>{const target=document.getElementById('source-'+site);const wasHidden=target.hidden;for(const sec of document.querySelectorAll('.source-section'))sec.hidden=true;for(const btn of document.querySelectorAll('.source-buttons button'))btn.classList.remove('active');if(wasHidden){target.hidden=false;document.getElementById('show-'+site.toLowerCase()).classList.add('active');target.scrollIntoView({behavior:'smooth',block:'nearest'})}})}
 
- // 화면에 보이는 비교 결과를 이미지로 저장 (자금 현황이 열려 있으면 포함)
- async function saveComparisonImage(){
-  const btn=document.getElementById('save-image');
-  btn.disabled=true;btn.textContent='이미지 생성 중…';
-  try{
-   if(typeof html2canvas!=='function') throw new Error('이미지 저장 기능을 불러오지 못했습니다. 인터넷 연결 상태에서 Safari로 열어주세요.');
-   // 화면에 실제 표시된 상단/선택창/자금현황/비교표만 캡처합니다.
-   const target=document.querySelector('.wrap');
-   const width=target.getBoundingClientRect().width;
-   const canvas=await html2canvas(target,{
-    backgroundColor:'#f3f6fa',scale:Math.min(2,Math.max(1,1200/width)),
-    useCORS:true,logging:false,scrollX:0,scrollY:-window.scrollY,
-    onclone:(doc)=>{
-     const style=doc.createElement('style');
-     style.textContent=`.footer,.note,.source-buttons,.data-details,.picker-overlay{display:none!important}
-      .wrap{margin-top:14px!important;margin-bottom:0!important}
+// 화면의 상단, 선택값, 자금 현황, 비교표를 실제 디자인 그대로 PNG로 캡처합니다.
+// 캡처 시 자금 현황은 자동으로 펼치고 ※ 안내문과 기능 버튼은 제외합니다.
+async function saveComparisonImage(){
+ const btn=document.getElementById('save-image');
+ const originalLabel=btn.textContent;
+ const wasHidden=financePanel.hidden;
+ btn.disabled=true;btn.textContent='이미지 생성 중…';
+ try{
+  if(typeof html2canvas!=='function')throw new Error('이미지 변환 도구를 불러오지 못했습니다. 인터넷이 연결된 Safari에서 열어주세요.');
+  if(wasHidden){financePanel.hidden=false;renderFinance();}
+  await new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve)));
+  const target=document.querySelector('.wrap');
+  const width=Math.ceil(target.getBoundingClientRect().width);
+  const canvas=await html2canvas(target,{
+   backgroundColor:'#f3f6fa',
+   scale:Math.min(2,Math.max(1,1200/width)),
+   useCORS:true,logging:false,scrollX:0,scrollY:-window.scrollY,
+   onclone(doc){
+    // 숨기기만 하지 않고 캡처 복제본에서 실제 제거하여 빈 공간도 남지 않도록 처리.
+    doc.querySelectorAll('.note,.fin-note,.footer,.source-buttons,.data-details,.picker-overlay').forEach(el=>el.remove());
+    const clonedFinance=doc.getElementById('finance-panel');
+    if(clonedFinance)clonedFinance.hidden=false;
+    const style=doc.createElement('style');
+    style.textContent=`.wrap{margin-top:12px!important;margin-bottom:0!important}
       .panel{padding-bottom:18px!important}
       .tablewrap{overflow:visible!important}
       .head p{margin-bottom:16px!important}`;
-     doc.head.appendChild(style);
-    }
-   });
-   const blob=await new Promise(resolve=>canvas.toBlob(resolve,'image/png'));
-   if(!blob)throw new Error('PNG 이미지를 만들지 못했습니다.');
-   const filename=`분양가_비교_${typeEl.value}_${floorEl.value}층.png`;
-   const file=new File([blob],filename,{type:'image/png'});
-   if(navigator.canShare&&navigator.share&&navigator.canShare({files:[file]})){
-    try{await navigator.share({files:[file],title:'분양가 비교'});return}
-    catch(e){if(e.name==='AbortError')return}
+    doc.head.appendChild(style);
    }
-   const url=URL.createObjectURL(blob);
-   const a=document.createElement('a');a.href=url;a.download=filename;
-   document.body.appendChild(a);a.click();a.remove();
-   setTimeout(()=>URL.revokeObjectURL(url),60000);
-  }catch(e){alert('이미지 저장에 실패했습니다: '+e.message)}
-  finally{btn.disabled=false;btn.textContent='📷 이미지로 저장'}
+  });
+  const blob=await new Promise(resolve=>canvas.toBlob(resolve,'image/png'));
+  if(!blob)throw new Error('PNG 이미지 생성에 실패했습니다.');
+  const filename=`분양가_비교_${typeEl.value}_${floorEl.value}층.png`;
+  const file=new File([blob],filename,{type:'image/png'});
+  if(navigator.share && navigator.canShare && navigator.canShare({files:[file]})){
+   try{await navigator.share({files:[file],title:'분양가 비교'});return;}
+   catch(e){if(e.name==='AbortError')return;}
+  }
+  const url=URL.createObjectURL(blob);
+  const link=document.createElement('a');link.href=url;link.download=filename;
+  document.body.appendChild(link);link.click();link.remove();
+  setTimeout(()=>URL.revokeObjectURL(url),60000);
+ }catch(e){alert('이미지 저장에 실패했습니다: '+e.message);}
+ finally{
+  if(wasHidden)financePanel.hidden=true;
+  document.getElementById('current').setAttribute('aria-expanded',String(!financePanel.hidden));
+  render();
+  btn.disabled=false;btn.textContent=originalLabel;
  }
+}
 document.getElementById('save-image').addEventListener('click',saveComparisonImage);
 </script><script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script></body></html>
